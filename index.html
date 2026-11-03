@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Умный Навигатор (Финальная версия) | РКНП</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a252f;
+            margin: 0;
+            padding: 10px;
+            color: #ecf0f1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            touch-action: manipulation;
+        }
+        header {
+            background: #2c3e50;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+            width: 100%;
+            max-width: 650px;
+            margin-bottom: 10px;
+            border: 1px solid #34495e;
+        }
+        h1 { font-size: 1.1rem; margin: 0 0 5px 0; }
+        p { font-size: 0.8rem; margin: 0; color: #bdc3c7; }
+        .main-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+            background: #2c3e50;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            max-width: 650px;
+            width: 100%;
+            border: 1px solid #34495e;
+        }
+        canvas {
+            border: 2px solid #1abc9c;
+            background-color: #2c3e50;
+            cursor: pointer;
+            width: 100%;
+            max-width: 480px;
+            height: auto;
+            aspect-ratio: 1 / 1;
+            border-radius: 4px;
+        }
+        .tool-panel {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+            justify-content: center;
+            background: #34495e;
+            padding: 8px;
+            border-radius: 6px;
+            width: 100%;
+        }
+        button {
+            background-color: #2980b9;
+            color: white;
+            border: none;
+            padding: 7px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            transition: background 0.3s;
+        }
+        button.active { background-color: #e67e22; font-weight: bold; }
+        .info-panel {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            background: #1a252f;
+            padding: 8px;
+            border-radius: 5px;
+            font-size: 0.8rem;
+            border: 1px solid #34495e;
+        }
+        .stat-val { font-weight: bold; color: #f39c12; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🧭 Умная карта города (Итоговая версия)</h1>
+        <p>РКНП • Секция: Информатика • Полная стабильность объектов</p>
+    </header>
+
+    <div class="main-container">
+        <div class="tool-panel">
+            <span style="font-size: 0.8rem; width: 100%; text-align: center; font-weight: bold; color: #f1c40f;">Выберите объект для размещения на карте:</span>
+            <button id="tool_accident" class="active" onclick="setTool('accident')">🚨 ДТП / Авария (3х3)</button>
+            <button id="tool_traffic_s" onclick="setTool('traffic_s')">🚗 Пробка (Малая)</button>
+            <button id="tool_traffic_m" onclick="setTool('traffic_m')">🚙 Пробка (Средняя)</button>
+            <button id="tool_traffic_l" onclick="setTool('traffic_l')">🚚 Пробка (Большая)</button>
+            <button id="tool_light10" onclick="setTool('light10')">🚦 Светофор 10с</button>
+            <button id="tool_light20" onclick="setTool('light20')">🚦 Светофор 20с</button>
+            <button style="background: #c0392b;" onclick="resetAll()">🔄 Очистить карту</button>
+        </div>
+
+        <canvas id="gridCanvas" width="512" height="512"></canvas>
+
+        <div class="info-panel">
+            <div>Статус: <span id="status" class="stat-val">Маршрут построен</span></div>
+            <div>Время пути: <span id="pathTime" class="stat-val">0 сек</span></div>
+            <div>Инструмент: <span id="currentToolName" class="stat-val">ДТП / Авария</span></div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gridCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        const GRID_SIZE = 64;
+        const CELL_SIZE = canvas.width / GRID_SIZE;
+        
+        let grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
+        
+        const start = { x: 4, y: 32 };
+        const end = { x: 59, y: 32 };
+        
+        let plannedPath = []; 
+        let activeTool = 'accident';
+        
+        let trafficLights = []; 
+        let dynamicObjects = [];
+
+        function setTool(tool) {
+            activeTool = tool;
+            document.querySelectorAll('.tool-panel button').forEach(b => {
+                if(b.style.background !== 'rgb(192, 57, 43)') b.classList.remove('active');
+            });
+            if(tool !== 'reset') document.getElementById('tool_' + tool).classList.add('active');
+            
+            const names = {
+                'accident': 'ДТП / Авария (3х3)',
+                'traffic_s': 'Малая пробка',
+                'traffic_m': 'Средняя пробка',
+                'traffic_l': 'Большая пробка',
+                'light10': 'Светофор 10 сек',
+                'light20': 'Светофор 20 сек'
+            };
+            document.getElementById('currentToolName').textContent = names[tool];
+        }
+
+        function drawCityMap() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    let isRoad = (x % 8 === 0 || y % 8 === 0 || Math.abs(x - 32) <= 1 || Math.abs(y - 32) <= 1);
+                    
+                    if (grid[y][x] === 1) {
+                        ctx.fillStyle = '#e74c3c'; // Авария
+                    } else if (grid[y][x] === 2) {
+                        ctx.fillStyle = '#e67e22'; // Пробка
+                    } else if (grid[y][x] === 3 || grid[y][x] === 4) {
+                        let tl = trafficLights.find(t => t.x === x && t.y === y);
+                        ctx.fillStyle = (tl && tl.isRed) ? '#c0392b' : '#2ecc71';
+                    } else if (isRoad) {
+                        ctx.fillStyle = '#34495e'; // Дорога
+                    } else {
+                        ctx.fillStyle = '#212f3d'; // Кварталы
+                    }
+                    ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE - 0.5, CELL_SIZE - 0.5);
+                }
+            }
+
+            if (plannedPath.length > 0) {
+                ctx.fillStyle = '#1abc9c'; 
+                for (let p of plannedPath) {
+                    if (!((p.x === start.x && p.y === start.y) || (p.x === end.x && p.y === end.y))) {
+                        ctx.fillRect(p.x * CELL_SIZE, p.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                    }
+                }
+            }
+
+            drawMarker(start.x, start.y, '#27ae60', 'А');
+            drawMarker(end.x, end.y, '#2980b9', 'Б');
+        }
+
+        function drawMarker(x, y, color, label) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc((x + 0.5) * CELL_SIZE, (y + 0.5) * CELL_SIZE, CELL_SIZE * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 9px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, (x + 0.5) * CELL_SIZE, (y + 0.5) * CELL_SIZE);
+        }
+
+        function calculatePath() {
+            let queue = [{x: start.x, y: start.y, path: []}];
+            let visited = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(false));
+            visited[start.y][start.x] = true;
+            
+            let foundPath = [];
+
+            while (queue.length > 0) {
+                let curr = queue.shift();
+                
+                if (curr.x === end.x && curr.y === end.y) {
+                    foundPath = curr.path.concat([end]);
+                    break;
+                }
+                
+                let directions = [{x:0, y:-1}, {x:0, y:1}, {x:-1, y:0}, {x:1, y:0}];
+                
+                for (let d of directions) {
+                    let nx = curr.x + d.x;
+                    let ny = curr.y + d.y;
+                    
+                    if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                        let isBlocked = false;
+                        if (grid[ny][nx] === 1 || grid[ny][nx] === 2) isBlocked = true;
+                        
+                        let tl = trafficLights.find(t => t.x === nx && t.y === ny);
+                        if (tl && tl.isRed) isBlocked = true;
+
+                        if (!visited[ny][nx] && !isBlocked) {
+                            visited[ny][nx] = true;
+                            queue.push({x: nx, y: ny, path: curr.path.concat([{x: curr.x, y: curr.y}])});
+                        }
+                    }
+                }
+            }
+            return foundPath;
+        }
+
+        function updateRealtime() {
+            plannedPath = calculatePath();
+            if (plannedPath.length > 0) {
+                document.getElementById('status').textContent = 'Маршрут перестроен (Оптимально)';
+                document.getElementById('pathTime').textContent = plannedPath.length + ' сек';
+            } else {
+                document.getElementById('status').textContent = 'Обходной путь отсутствует!';
+                document.getElementById('pathTime').textContent = '∞ сек';
+            }
+            drawCityMap();
+        }
+
+        function handleInteraction(clientX, clientY) {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = clientX - rect.left;
+            const mouseY = clientY - rect.top;
+            
+            const cellX = Math.floor((mouseX / rect.width) * GRID_SIZE);
+            const cellY = Math.floor((mouseY / rect.height) * GRID_SIZE);
+            
+            if ((cellX === start.x && cellY === start.y) || (cellX === end.x && cellY === end.y)) return;
+
+            if (cellX >= 0 && cellX < GRID_SIZE && cellY >= 0 && cellY < GRID_SIZE) {
+                if (activeTool === 'accident') {
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            let nx = cellX + dx, ny = cellY + dy;
+                            if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                                if (!((nx === start.x && ny === start.y) || (nx === end.x && ny === end.y))) {
+                                    grid[ny][nx] = 1;
+                                }
+                            }
+                        }
+                    }
+                    setTimeout(() => {
+                        for (let dy = -1; dy <= 1; dy++) {
+                            for (let dx = -1; dx <= 1; dx++) {
+                                let nx = cellX + dx, ny = cellY + dy;
+                                if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                                    if (grid[ny][nx] === 1) grid[ny][nx] = 0;
+                                }
+                            }
+                        }
+                        updateRealtime();
+                    }, 100000);
+                } else if (activeTool.startsWith('traffic')) {
+                    let size = activeTool === 'traffic_s' ? 2 : (activeTool === 'traffic_m' ? 4 : 6);
+                    let canPlace = true;
+                    for(let i = 0; i < size; i++) {
+                        if(cellX + i >= GRID_SIZE || grid[cellY][cellX + i] !== 0) canPlace = false;
+                    }
+                    if (canPlace) {
+                        for(let i = 0; i < size; i++) {
+                            grid[cellY][cellX + i] = 2;
+                        }
+                        dynamicObjects.push({x: cellX, y: cellY, size: size, dir: 1, waiting: 0});
+                    }
+                } else if (activeTool === 'light10' || activeTool === 'light20') {
+                    let interval = activeTool === 'light10' ? 10 : 20;
+                    if (grid[cellY][cellX] === 0) {
+                        // Устанавливаем код света (3 или 4)
+                        let lightCode = activeTool === 'light10' ? 3 : 4;
+                        grid[cellY][cellX] = lightCode;
+                        trafficLights.push({x: cellX, y: cellY, interval: interval, ticks: 0, isRed: false, code: lightCode});
+                    }
+                }
+                
+                updateRealtime();
+            }
+        }
+
+        canvas.addEventListener('click', e => handleInteraction(e.clientX, e.clientY));
+        canvas.addEventListener('touchstart', e => {
+            e.preventDefault();
+            if (e.touches.length > 0) handleInteraction(e.touches[0].clientX, e.touches[0].clientY);
+        }, { passive: false });
+
+        setInterval(() => {
+            let changed = false;
+
+            // Восстанавливаем светофоры на сетке перед очисткой пробок, чтобы они никогда не стирались
+            for (let tl of trafficLights) {
+                if (grid[tl.y][tl.x] === 0) {
+                    grid[tl.y][tl.x] = tl.code;
+                }
+            }
+
+            for (let obj of dynamicObjects) {
+                for(let i = 0; i < obj.size; i++) {
+                    if (obj.x + i >= 0 && obj.x + i < GRID_SIZE && grid[obj.y][obj.x + i] === 2) {
+                        grid[obj.y][obj.x + i] = 0;
+                    }
+                }
+            }
+
+            let survivingTraffics = [];
+            for (let obj of dynamicObjects) {
+                if (obj.waiting > 0) {
+                    obj.waiting--;
+                    for(let i = 0; i < obj.size; i++) {
+                        if (obj.x + i < GRID_SIZE && grid[obj.y][obj.x + i] === 0) grid[obj.y][obj.x + i] = 2;
+                    }
+                    survivingTraffics.push(obj);
+                    continue;
+                }
+
+                let nextX = obj.x + obj.dir;
+                
+                // Пробки исчезают ТОЛЬКО когда доходят до конца/края маршрута
+                if (nextX <= 1 || nextX + obj.size >= GRID_SIZE - 1 || (Math.abs(nextX - end.x) < 2 && obj.y === end.y)) {
+                    changed = true;
+                    continue; 
+                }
+
+                // Столкновение с аварией -> ждет 10 секунд и исчезает
+                let hitAccident = false;
+                for(let i = 0; i < obj.size; i++) {
+                    if(grid[obj.y][nextX + i] === 1) hitAccident = true;
+                }
+
+                if (hitAccident) {
+                    obj.waiting = 10;
+                    for(let i = 0; i < obj.size; i++) {
+                        if (obj.x + i < GRID_SIZE && grid[obj.y][obj.x + i] === 0) grid[obj.y][obj.x + i] = 2;
+                    }
+                    survivingTraffics.push(obj);
+                    setTimeout(() => { obj.dead = true; }, 10000);
+                    continue;
+                }
+
+                if(obj.dead) {
+                    changed = true;
+                    continue;
+                }
+
+                // Светофор: ждет красный свет на месте (НЕ исчезает!)
+                let hitRedLight = false;
+                for(let i = 0; i < obj.size; i++) {
+                    let tl = trafficLights.find(t => t.x === nextX + i && t.y === obj.y);
+                    if (tl && tl.isRed) hitRedLight = true;
+                }
+
+                let blockedByAnotherTraffic = false;
+                for(let other of survivingTraffics) {
+                    if (other !== obj && other.y === obj.y) {
+                        let thisLeft = nextX;
+                        let thisRight = nextX + obj.size - 1;
+                        let otherLeft = other.x;
+                        let otherRight = other.x + other.size - 1;
+                        if (!(thisRight < otherLeft || thisLeft > otherRight)) {
+                            blockedByAnotherTraffic = true;
+                        }
+                    }
+                }
+
+                if (hitRedLight || blockedByAnotherTraffic) {
+                    for(let i = 0; i < obj.size; i++) {
+                        if (obj.x + i < GRID_SIZE && grid[obj.y][obj.x + i] === 0) grid[obj.y][obj.x + i] = 2;
+                    }
+                    survivingTraffics.push(obj);
+                    continue;
+                }
+
+                obj.x = nextX;
+                for(let i = 0; i < obj.size; i++) {
+                    if (obj.x + i < GRID_SIZE && grid[obj.y][obj.x + i] === 0) grid[obj.y][obj.x + i] = 2;
+                }
+                survivingTraffics.push(obj);
+                changed = true;
+            }
+            dynamicObjects = survivingTraffics.filter(o => !o.dead);
+
+            for (let tl of trafficLights) {
+                tl.ticks++;
+                if (tl.ticks >= tl.interval) {
+                    tl.isRed = !tl.isRed;
+                    tl.ticks = 0;
+                    changed = true;
+                }
+            }
+
+            if (changed) updateRealtime();
+        }, 1000);
+
+        function resetAll() {
+            grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
+            trafficLights = [];
+            dynamicObjects = [];
+            updateRealtime();
+            document.getElementById('status').textContent = 'Карта очищена';
+        }
+
+        updateRealtime();
+    </script>
+</body>
+</html>
